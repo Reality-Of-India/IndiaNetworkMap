@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/Reality-Of-India/IndiaNetworkMap/compare/v1.0.0...v1.1.0) (2026-05-21)
+
+
+### Features
+
+* Add release governance ([#4](https://github.com/Reality-Of-India/IndiaNetworkMap/issues/4)) ([#5](https://github.com/Reality-Of-India/IndiaNetworkMap/issues/5)) ([#8](https://github.com/Reality-Of-India/IndiaNetworkMap/issues/8)) ([02f26c4](https://github.com/Reality-Of-India/IndiaNetworkMap/commit/02f26c46738182d8918a7bc531a2319394812b9d))
+
 # 1.0.0 (2026-05-21)
 
 
