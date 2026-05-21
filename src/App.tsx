@@ -52,7 +52,7 @@ function AppContent() {
         </div>
       )}
       <header>
-        <span className="app-title">{APP_NAME.label}</span>
+        <span className="app-title">Network Map - {APP_NAME.label}</span>
         <div className="header-actions">
           <button 
             className="icon-btn" 
