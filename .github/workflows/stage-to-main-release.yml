@@ -1,0 +1,121 @@
+name: Stage To Main Movement
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  create-stage-to-main-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or update release PR (stage -> main)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PR_AUTOMATION_TOKEN || github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const now = new Date().toISOString().slice(0, 10);
+
+            const parseTag = (name) => {
+              const m = /^v(\\d+)\\.(\\d+)\\.(\\d+)$/.exec(name);
+              if (!m) return null;
+              return {
+                major: Number(m[1]),
+                minor: Number(m[2]),
+                patch: Number(m[3]),
+              };
+            };
+
+            const compare = (a, b) => {
+              if (a.major !== b.major) return a.major - b.major;
+              if (a.minor !== b.minor) return a.minor - b.minor;
+              return a.patch - b.patch;
+            };
+
+            const tags = await github.paginate(github.rest.repos.listTags, {
+              owner,
+              repo,
+              per_page: 100,
+            });
+
+            let latest = null;
+            for (const t of tags) {
+              const v = parseTag(t.name);
+              if (!v) continue;
+              if (!latest || compare(v, latest) > 0) latest = v;
+            }
+
+            const next = latest
+              ? { major: latest.major, minor: latest.minor, patch: latest.patch + 1 }
+              : { major: 1, minor: 0, patch: 1 };
+
+            const nextVersion = `v${next.major}.${next.minor}.${next.patch}`;
+            const expectedTitle = `release(${now}): ${nextVersion} to main`;
+
+            const existing = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              base: 'main',
+              head: `${owner}:stage`,
+              per_page: 10,
+            });
+
+            if (existing.data.length > 0) {
+              const pr = existing.data[0];
+              if (pr.title !== expectedTitle) {
+                await github.rest.pulls.update({
+                  owner,
+                  repo,
+                  pull_number: pr.number,
+                  title: expectedTitle,
+                });
+                core.info(`Updated stage->main PR title to '${expectedTitle}'.`);
+              }
+              core.info(`Release PR already exists: #${pr.number} ${pr.html_url}`);
+              return;
+            }
+
+            const created = await github.rest.pulls.create({
+              owner,
+              repo,
+              title: expectedTitle,
+              head: 'stage',
+              base: 'main',
+              body: [
+                'Automated release PR generated from `stage` to `main`.',
+                '',
+                '- Source branch: `stage`',
+                '- Target branch: `main`',
+                `- Planned version tag: \`${nextVersion}\``,
+              ].join('\n'),
+              maintainer_can_modify: true,
+            });
+
+            const stageRef = await github.rest.git.getRef({
+              owner,
+              repo,
+              ref: 'heads/stage',
+            });
+
+            try {
+              await github.rest.git.createRef({
+                owner,
+                repo,
+                ref: `refs/tags/${nextVersion}`,
+                sha: stageRef.data.object.sha,
+              });
+              core.info(`Created version tag ${nextVersion} at stage HEAD.`);
+            } catch (error) {
+              if (error.status === 422) {
+                core.info(`Tag ${nextVersion} already exists. Skipping tag creation.`);
+              } else {
+                throw error;
+              }
+            }
+
+            core.info(`Created stage->main PR: #${created.data.number} ${created.data.html_url}`);
