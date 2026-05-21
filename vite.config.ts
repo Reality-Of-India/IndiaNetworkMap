@@ -1,10 +1,20 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import {APP_NAME} from  './app.config';
+import packageJson from './package.json';
+
+function resolveBaseFromHomepage(homepage?: string): string {
+  if (!homepage) return '/';
+  try {
+    const pathname = new URL(homepage).pathname;
+    return pathname.endsWith('/') ? pathname : `${pathname}/`;
+  } catch {
+    return '/';
+  }
+}
 
 export default defineConfig({
   plugins: [react()],
-  base: `/${APP_NAME.name}/`,
+  base: resolveBaseFromHomepage((packageJson as { homepage?: string }).homepage),
   build: {
     outDir: 'dist',
     sourcemap: false
