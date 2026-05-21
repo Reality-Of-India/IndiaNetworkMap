@@ -1,0 +1,121 @@
+name: Dev To Stage Release
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [stage]
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  create-dev-to-stage-pr-and-freeze:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create/update dev->stage release PR and freeze dev PRs
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PR_AUTOMATION_TOKEN || github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const existing = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              base: 'stage',
+              head: `${owner}:dev`,
+              per_page: 10,
+            });
+
+            let stageReleasePr;
+            if (existing.data.length > 0) {
+              stageReleasePr = existing.data[0];
+              core.info(`Existing dev->stage PR: #${stageReleasePr.number} ${stageReleasePr.html_url}`);
+            } else {
+              const now = new Date().toISOString().slice(0, 10);
+              stageReleasePr = (await github.rest.pulls.create({
+                owner,
+                repo,
+                title: `stage release: dev to stage (${now})`,
+                head: 'dev',
+                base: 'stage',
+                draft: true,
+                body: [
+                  'Automated stage release PR from `dev` to `stage`.',
+                  '',
+                  '- This enables code freeze on dev PRs.',
+                  '- Keep as draft until stage cut is ready.',
+                ].join('\n'),
+                maintainer_can_modify: true,
+              })).data;
+              core.info(`Created dev->stage PR: #${stageReleasePr.number} ${stageReleasePr.html_url}`);
+            }
+
+            const ensureLabel = async (issue_number, label) => {
+              const issue = await github.rest.issues.get({ owner, repo, issue_number });
+              const hasLabel = (issue.data.labels || []).some((l) => (typeof l === 'string' ? l : l.name) === label);
+              if (!hasLabel) {
+                await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [label] });
+              }
+            };
+
+            await ensureLabel(stageReleasePr.number, 'code-freeze');
+
+            const devPrs = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              base: 'dev',
+              per_page: 100,
+            });
+
+            for (const pr of devPrs) {
+              // Exclude release route PR patterns explicitly, even if they shouldn't target dev.
+              if (
+                (pr.base.ref === 'main' && pr.head.ref === 'stage') ||
+                (pr.base.ref === 'stage' && pr.head.ref === 'dev')
+              ) {
+                continue;
+              }
+              await ensureLabel(pr.number, 'code-freeze');
+              core.info(`Applied code-freeze to PR #${pr.number}.`);
+            }
+
+  unfreeze-when-dev-to-stage-merged:
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'stage' && github.event.pull_request.head.ref == 'dev' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove code-freeze label from open dev PRs
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PR_AUTOMATION_TOKEN || github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const devPrs = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              base: 'dev',
+              per_page: 100,
+            });
+
+            for (const pr of devPrs) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number: pr.number,
+                  name: 'code-freeze',
+                });
+                core.info(`Removed code-freeze from PR #${pr.number}.`);
+              } catch (error) {
+                if (error.status !== 404) throw error;
+              }
+            }
