@@ -1,0 +1,79 @@
+name: Branch Governance
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - stage
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - labeled
+      - unlabeled
+      - edited
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  main-merge-owner-only:
+    if: ${{ github.event.pull_request.base.ref == 'main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce owner-only PRs to main
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const actor = context.actor;
+            const owner = context.repo.owner;
+            const headRef = context.payload.pull_request.head.ref;
+
+            if (headRef !== 'stage') {
+              core.setFailed(`PRs to main must come from stage. Current head branch is '${headRef}'.`);
+              return;
+            }
+
+            if (actor !== owner) {
+              core.setFailed(`Only repository owner '${owner}' can create/update PRs targeting main. Triggered by '${actor}'.`);
+              return;
+            }
+
+            core.info(`Policy passed: PR to main is from stage and triggered by owner '${owner}'.`);
+
+  freeze-dev-during-stage-cut:
+    if: ${{ github.event.pull_request.base.ref == 'dev' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Block dev merges while code-freeze PR is open
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const prs = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              base: 'stage',
+              head: `${owner}:dev`,
+              per_page: 100,
+            });
+
+            const freezePR = prs.find((pr) =>
+              (pr.labels || []).some((label) => label.name === 'code-freeze')
+            );
+
+            if (freezePR) {
+              core.setFailed(
+                `Code freeze is active via PR #${freezePR.number} (${freezePR.html_url}). ` +
+                `Merges into dev are blocked until this dev->stage PR is merged or 'code-freeze' label is removed.`
+              );
+              return;
+            }
+
+            core.info('No active code-freeze PR found. Merges to dev are allowed.');
