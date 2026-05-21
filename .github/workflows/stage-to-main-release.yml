@@ -25,7 +25,7 @@ jobs:
             const now = new Date().toISOString().slice(0, 10);
 
             const parseTag = (name) => {
-              const m = /^v(\\d+)\\.(\\d+)\\.(\\d+)$/.exec(name);
+              const m = /^v(\d+)\.(\d+)\.(\d+)$/.exec(name);
               if (!m) return null;
               return {
                 major: Number(m[1]),
