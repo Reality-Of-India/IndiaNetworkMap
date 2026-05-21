@@ -46,6 +46,22 @@ jobs:
                 });
                 core.info(`Updated dev->stage PR title to '${expectedTitle}'.`);
               }
+              if (stageReleasePr.draft) {
+                await github.graphql(
+                  `
+                    mutation($pullRequestId: ID!) {
+                      markPullRequestReadyForReview(input: { pullRequestId: $pullRequestId }) {
+                        pullRequest {
+                          number
+                          isDraft
+                        }
+                      }
+                    }
+                  `,
+                  { pullRequestId: stageReleasePr.node_id }
+                );
+                core.info(`Converted dev->stage PR #${stageReleasePr.number} to ready for review.`);
+              }
               core.info(`Existing dev->stage PR: #${stageReleasePr.number} ${stageReleasePr.html_url}`);
             } else {
               stageReleasePr = (await github.rest.pulls.create({
@@ -54,12 +70,12 @@ jobs:
                 title: expectedTitle,
                 head: 'dev',
                 base: 'stage',
-                draft: true,
+                draft: false,
                 body: [
                   'Automated stage release PR from `dev` to `stage`.',
                   '',
-                  '- This enables code freeze on dev PRs.',
-                  '- Keep as draft until stage cut is ready.',
+                  '- This enables code freeze on eligible dev PRs.',
+                  '- PR is created as ready for review.',
                 ].join('\n'),
                 maintainer_can_modify: true,
               })).data;
@@ -74,8 +90,6 @@ jobs:
               }
             };
 
-            await ensureLabel(stageReleasePr.number, 'code-freeze');
-
             const devPrs = await github.paginate(github.rest.pulls.list, {
               owner,
               repo,
@@ -85,6 +99,8 @@ jobs:
             });
 
             for (const pr of devPrs) {
+              if (pr.number === stageReleasePr.number) continue;
+              if (pr.draft) continue; // only freeze PRs that are ready for review
               // Exclude release route PR patterns explicitly, even if they shouldn't target dev.
               if (
                 (pr.base.ref === 'main' && pr.head.ref === 'stage') ||

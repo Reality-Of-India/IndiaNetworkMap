@@ -31,14 +31,12 @@ jobs:
               per_page: 100,
             });
 
-            const activeFreeze = freezePrs.find((pr) =>
-              (pr.labels || []).some((label) => label.name === 'code-freeze')
-            );
+            const activeFreeze = freezePrs[0];
 
             if (activeFreeze) {
               core.setFailed(
                 `Code freeze is active via PR #${activeFreeze.number} (${activeFreeze.html_url}). ` +
-                `Merges into dev are blocked until the dev->stage release PR is merged or freeze is removed.`
+                `Merges into dev are blocked until the dev->stage release PR is merged/closed.`
               );
               return;
             }

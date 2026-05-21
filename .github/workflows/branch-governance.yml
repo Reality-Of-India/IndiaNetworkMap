@@ -64,16 +64,14 @@ jobs:
               per_page: 100,
             });
 
-            const freezePR = prs.find((pr) =>
-              (pr.labels || []).some((label) => label.name === 'code-freeze')
-            );
+            const freezePR = prs[0];
 
             if (freezePR) {
               core.setFailed(
                 `Code freeze is active via PR #${freezePR.number} (${freezePR.html_url}). ` +
-                `Merges into dev are blocked until this dev->stage PR is merged or 'code-freeze' label is removed.`
+                `Merges into dev are blocked until this dev->stage PR is merged/closed.`
               );
               return;
             }
 
-            core.info('No active code-freeze PR found. Merges to dev are allowed.');
+            core.info('No active dev->stage release PR found. Merges to dev are allowed.');
