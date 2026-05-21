@@ -33,15 +33,25 @@ jobs:
             });
 
             let stageReleasePr;
+            const now = new Date().toISOString().slice(0, 10);
+            const expectedTitle = `chore(${now}): release dev to stage`;
             if (existing.data.length > 0) {
               stageReleasePr = existing.data[0];
+              if (stageReleasePr.title !== expectedTitle) {
+                await github.rest.pulls.update({
+                  owner,
+                  repo,
+                  pull_number: stageReleasePr.number,
+                  title: expectedTitle,
+                });
+                core.info(`Updated dev->stage PR title to '${expectedTitle}'.`);
+              }
               core.info(`Existing dev->stage PR: #${stageReleasePr.number} ${stageReleasePr.html_url}`);
             } else {
-              const now = new Date().toISOString().slice(0, 10);
               stageReleasePr = (await github.rest.pulls.create({
                 owner,
                 repo,
-                title: `stage release: dev to stage (${now})`,
+                title: expectedTitle,
                 head: 'dev',
                 base: 'stage',
                 draft: true,
