@@ -2,6 +2,9 @@ name: Stage To Main Movement
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    types: [closed]
 
 permissions:
   contents: write
@@ -9,6 +12,7 @@ permissions:
 
 jobs:
   create-stage-to-main-pr:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Create or update release PR (stage -> main)
@@ -65,6 +69,16 @@ jobs:
               per_page: 10,
             });
 
+            const delta = await github.rest.repos.compareCommitsWithBasehead({
+              owner,
+              repo,
+              basehead: 'main...stage',
+            });
+            if (delta.data.ahead_by === 0) {
+              core.info('No new commits to release from stage to main. Skipping PR creation/update.');
+              return;
+            }
+
             if (existing.data.length > 0) {
               const pr = existing.data[0];
               if (pr.title !== expectedTitle) {
@@ -119,3 +133,42 @@ jobs:
             }
 
             core.info(`Created stage->main PR: #${created.data.number} ${created.data.html_url}`);
+
+  back-merge-after-stage-to-main:
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main' && github.event.pull_request.head.ref == 'stage' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Back-merge main into stage and stage into dev
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PR_AUTOMATION_TOKEN || github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const mergeBranch = async (base, head, message) => {
+              try {
+                const result = await github.rest.repos.merge({
+                  owner,
+                  repo,
+                  base,
+                  head,
+                  commit_message: message,
+                });
+                core.info(`Merged ${head} -> ${base}: ${result.data.sha}`);
+              } catch (error) {
+                if (error.status === 204 || error.status === 201) return;
+                if (error.status === 409) {
+                  core.setFailed(`Merge conflict while merging ${head} -> ${base}. Resolve manually.`);
+                  return;
+                }
+                if (error.status === 422) {
+                  core.info(`No merge needed for ${head} -> ${base}.`);
+                  return;
+                }
+                throw error;
+              }
+            };
+
+            await mergeBranch('stage', 'main', 'chore(sync): back-merge main into stage after production release');
+            await mergeBranch('dev', 'stage', 'chore(sync): propagate production sync from stage into dev');
