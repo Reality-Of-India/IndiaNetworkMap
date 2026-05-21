@@ -158,6 +158,7 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+            let stageReleasePrNumber = null;
 
             const existing = await github.rest.pulls.list({
               owner,
@@ -170,42 +171,65 @@ jobs:
 
             if (existing.data.length > 0) {
               const pr = existing.data[0];
+              stageReleasePrNumber = pr.number;
               const hasFreeze = (pr.labels || []).some((l) => l.name === 'code-freeze');
               if (!hasFreeze) {
                 await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: ['code-freeze'] });
               }
               core.info(`Existing stage release PR: #${pr.number} ${pr.html_url}`);
-              return;
+            } else {
+              const now = new Date().toISOString().slice(0, 10);
+              try {
+                const created = await github.rest.pulls.create({
+                  owner,
+                  repo,
+                  title: `stage release: dev to stage (${now})`,
+                  head: 'dev',
+                  base: 'stage',
+                  draft: true,
+                  body: [
+                    'Automated stage release PR generated from `dev` to `stage`.',
+                    '',
+                    '- `code-freeze` is active while this PR is open.',
+                    '- This PR is intentionally created as draft to prevent immediate merge.',
+                  ].join('\n'),
+                  maintainer_can_modify: true,
+                });
+
+                stageReleasePrNumber = created.data.number;
+                await github.rest.issues.addLabels({ owner, repo, issue_number: created.data.number, labels: ['code-freeze'] });
+                core.info(`Created stage release PR: #${created.data.number} ${created.data.html_url}`);
+              } catch (error) {
+                if (error.status === 403 && String(error.message).includes('not permitted to create or approve pull requests')) {
+                  core.setFailed(
+                    "PR creation is blocked for GITHUB_TOKEN. Enable 'Allow GitHub Actions to create and approve pull requests' in repository Actions settings, or set secret PR_AUTOMATION_TOKEN with repo scope."
+                  );
+                  return;
+                }
+                throw error;
+              }
             }
 
-            const now = new Date().toISOString().slice(0, 10);
-            try {
-              const created = await github.rest.pulls.create({
+            // Mark all open PRs targeting dev as code-freeze (except the stage release PR itself).
+            const devPrs = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              base: 'dev',
+              per_page: 100,
+            });
+
+            for (const pr of devPrs) {
+              if (pr.number === stageReleasePrNumber) continue;
+              const hasFreeze = (pr.labels || []).some((l) => l.name === 'code-freeze');
+              if (hasFreeze) continue;
+              await github.rest.issues.addLabels({
                 owner,
                 repo,
-                title: `stage release: dev to stage (${now})`,
-                head: 'dev',
-                base: 'stage',
-                draft: true,
-                body: [
-                  'Automated stage release PR generated from `dev` to `stage`.',
-                  '',
-                  '- `code-freeze` is active while this PR is open.',
-                  '- This PR is intentionally created as draft to prevent immediate merge.',
-                ].join('\n'),
-                maintainer_can_modify: true,
+                issue_number: pr.number,
+                labels: ['code-freeze'],
               });
-
-              await github.rest.issues.addLabels({ owner, repo, issue_number: created.data.number, labels: ['code-freeze'] });
-              core.info(`Created stage release PR: #${created.data.number} ${created.data.html_url}`);
-            } catch (error) {
-              if (error.status === 403 && String(error.message).includes('not permitted to create or approve pull requests')) {
-                core.setFailed(
-                  "PR creation is blocked for GITHUB_TOKEN. Enable 'Allow GitHub Actions to create and approve pull requests' in repository Actions settings, or set secret PR_AUTOMATION_TOKEN with repo scope."
-                );
-                return;
-              }
-              throw error;
+              core.info(`Added code-freeze label to PR #${pr.number}.`);
             }
 
   create-stage-to-main-release-pr:
