@@ -1,4 +1,4 @@
-name: Create Production Release
+name: Create Main To Production Release
 
 on:
   push:
