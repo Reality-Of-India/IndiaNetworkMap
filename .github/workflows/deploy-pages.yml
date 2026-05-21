@@ -1,4 +1,4 @@
-name: Release for Production
+name: Deployment for Production
 
 on:
   release:
