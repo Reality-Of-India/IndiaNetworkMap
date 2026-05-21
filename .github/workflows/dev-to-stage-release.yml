@@ -1,4 +1,4 @@
-name: Dev To Stage Release
+name: Dev To Stage Movement
 
 on:
   workflow_dispatch:
