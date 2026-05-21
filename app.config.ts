@@ -1,1 +1,1 @@
-export const APP_NAME = {name: "reality-of-india", label: "Reality Of India"} 
+export const APP_NAME = { name: "IndiaNetworkMap", label: "Reality Of India" };
